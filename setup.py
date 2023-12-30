@@ -9,7 +9,7 @@ setup(
     data_files=[
         ('share/' + package_name, ['package.xml'])
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'pygame'],
     zip_safe=True,
     maintainer='satoshi',
     maintainer_email='satoshi@todo.todo',
@@ -19,6 +19,7 @@ setup(
     entry_points={
         'console_scripts': [
             'command_setter = control_command_setter.command_setter:main',
+            'controller_cmd_setter = control_command_setter.controller_cmd_setter:main',
         ],
     },
 )
