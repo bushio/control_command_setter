@@ -3,6 +3,7 @@
 
 import time
 import sys
+import math
 import rclpy
 import pygame
 from rclpy.node import Node
@@ -28,6 +29,17 @@ class Controller_cmd_setter(Node):
         # log を出力するかどうか
         self.log = False
 
+        # ステアリングを手動にするか
+        self.manual_steering = False
+        # 現在のステアリング値
+        self.target_steering = 0.0
+        self.target_angle = 0.0
+        # ホイールの長さ
+        self.wheel_base = 2.9718
+        # ジョイスティックの移動で何度動かすか
+        self.steering_scale = 45.0
+        self.button_cout = 0
+
         # 0.1 秒ごとにコントローラーの入力を更新
         timer_period = 0.1
         self.timer = self.create_timer(timer_period, self.timer_callback)
@@ -39,24 +51,50 @@ class Controller_cmd_setter(Node):
 
     # コントローラーからの入力を更新
     def timer_callback(self):
+        self.button_cout += 1 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
 
-        self.target_vel  =  self.target_vel + self.joystick.get_axis(3) * (-1.0)
-        
         # Aボタンで速度を +10 km/s
         if self.joystick.get_button(0): 
             self.target_vel += 10.0
         
-        # Aボタンで速度を -10 km/s
+        # Xボタンで速度を -10 km/s
         if self.joystick.get_button(1): 
             self.target_vel -= 10.0
 
-        self.target_vel = min(max( self.target_vel, 0), 150)
-        self.get_logger().info("target_vel:{}".format(self.target_vel))
+        # B ボタンでステアリングモードを切り替え
+        if self.joystick.get_button(2):
+            if self.button_cout > 2: #チャタリング防止
+                self.manual_steering = not self.manual_steering
+                self.button_cout = 0
 
+        # Joystick の値を反映
+        if self.joystick.get_hat(0):
+            joystic_x, joystic_y = self.joystick.get_hat(0)
+            self.target_vel  =  self.target_vel + joystic_x * 1.0
+
+            if self.manual_steering:
+                self.target_angle = self.target_angle + joystic_y * self.steering_scale
+                self.target_angle = max(min(self.target_angle, 200), -200)
+                self.target_steering = self.target_angle /(self.wheel_base * 360)
+
+        # Yボタンで角度を０に戻す
+        if self.joystick.get_button(3):
+            if self.manual_steering:
+                self.target_angle = 0.0
+                self.target_steering = self.target_angle /(self.wheel_base * 360)
+
+        if self.joystick.get_axis(3):
+            self.target_vel  =  self.target_vel + self.joystick.get_axis(3) * (-1.0)
+    
+        self.target_vel = min(max( self.target_vel, 0), 200)
+        self.get_logger().info("target_vel:{} steering: {} steering_mode: {}".format(self.target_vel,
+                                                                   self.target_angle,
+                                                                   self.manual_steering
+                                                                   ))
     # 制御コマンドを送受信
     def onTrigger(self, msg):
         # km/h ->m/s
@@ -72,6 +110,13 @@ class Controller_cmd_setter(Node):
 
         # accel を計算
         msg.longitudinal.acceleration = float(self.speed_proportional_gain_ * (target_vel - current_longitudinal_vel))
+
+        # 自動ステアリングモードではステアリング値を取得
+        if not (self.manual_steering):
+            self.target_steering = msg.lateral.steering_tire_angle
+            self.target_angle = (self.target_steering * 360.0 * self.wheel_base)
+        else:
+            msg.lateral.steering_tire_angle = self.target_steering
 
         # トピックを送信
         self.vehicle_inputs_pub_.publish(msg)
